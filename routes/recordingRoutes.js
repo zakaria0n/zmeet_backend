@@ -2,6 +2,7 @@ import express from 'express';
 import { supabase, supabaseClient } from '../services/supabaseClient.js';
 
 const router = express.Router();
+const RECORDINGS_BUCKET = 'recordings';
 
 async function getAuthenticatedUser(req) {
     const authHeader = req.headers.authorization;
@@ -18,6 +19,22 @@ async function getAuthenticatedUser(req) {
     }
 
     return user;
+}
+
+function getStoragePathFromPublicUrl(fileUrl) {
+    try {
+        const url = new URL(fileUrl);
+        const marker = `/storage/v1/object/public/${RECORDINGS_BUCKET}/`;
+        const markerIndex = url.pathname.indexOf(marker);
+
+        if (markerIndex === -1) {
+            return null;
+        }
+
+        return decodeURIComponent(url.pathname.slice(markerIndex + marker.length));
+    } catch {
+        return null;
+    }
 }
 
 // Get all recordings for a specific user
@@ -62,6 +79,50 @@ router.post('/save-metadata', async (req, res) => {
 
         if (error) throw error;
         res.status(201).json({ success: true, data });
+    } catch (err) {
+        const status = err.message === 'Missing auth token' || err.message === 'Invalid auth token' ? 401 : 500;
+        res.status(status).json({ error: err.message });
+    }
+});
+
+router.delete('/:recordingId', async (req, res) => {
+    const { recordingId } = req.params;
+
+    try {
+        const user = await getAuthenticatedUser(req);
+
+        const { data: recording, error: fetchError } = await supabase
+            .from('Recordings')
+            .select('id, file_url')
+            .eq('id', recordingId)
+            .eq('created_by', user.id)
+            .single();
+
+        if (fetchError || !recording) {
+            return res.status(404).json({ error: 'Recording not found' });
+        }
+
+        const storagePath = getStoragePathFromPublicUrl(recording.file_url);
+
+        if (storagePath) {
+            const { error: storageError } = await supabase.storage
+                .from(RECORDINGS_BUCKET)
+                .remove([storagePath]);
+
+            if (storageError) {
+                throw storageError;
+            }
+        }
+
+        const { error: deleteError } = await supabase
+            .from('Recordings')
+            .delete()
+            .eq('id', recordingId)
+            .eq('created_by', user.id);
+
+        if (deleteError) throw deleteError;
+
+        res.status(200).json({ success: true });
     } catch (err) {
         const status = err.message === 'Missing auth token' || err.message === 'Invalid auth token' ? 401 : 500;
         res.status(status).json({ error: err.message });
