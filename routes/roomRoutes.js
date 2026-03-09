@@ -32,7 +32,7 @@ router.post('/create', async (req, res) => {
 
 // Get room details by its code
 router.get('/:roomCode', async (req, res) => {
-    const { roomCode } = req.params;
+    const roomCode = req.params.roomCode.toLowerCase();
 
     try {
         const { data, error } = await supabase

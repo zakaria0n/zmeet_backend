@@ -4,29 +4,42 @@ export default function setupSockets(io) {
     io.on('connection', (socket) => {
         console.log(`Socket connected: ${socket.id}`);
 
-        socket.on('join-room', (roomId, userId) => {
+        socket.on('join-room', (roomId, userId, userName) => {
             console.log(`User ${userId} joining room ${roomId}`);
             socket.join(roomId);
 
             socket.userId = userId;
             socket.roomId = roomId;
+            socket.userName = userName;
 
             // Notify everyone else in the room
-            socket.to(roomId).emit('user-connected', userId);
+            socket.to(roomId).emit('user-connected', { userId, userName });
 
             // Forward WebRTC Signaling: Offer
-            socket.on('webrtc-offer', (offer, toUserId) => {
-                socket.to(roomId).emit('webrtc-offer', offer, userId, toUserId);
+            socket.on('webrtc-offer', ({ offer, target }) => {
+                socket.to(roomId).emit('webrtc-offer', {
+                    offer,
+                    senderId: userId,
+                    target
+                });
             });
 
             // Forward WebRTC Signaling: Answer
-            socket.on('webrtc-answer', (answer, toUserId) => {
-                socket.to(roomId).emit('webrtc-answer', answer, userId, toUserId);
+            socket.on('webrtc-answer', ({ answer, target }) => {
+                socket.to(roomId).emit('webrtc-answer', {
+                    answer,
+                    senderId: userId,
+                    target
+                });
             });
 
             // Forward WebRTC Signaling: ICE Candidate
-            socket.on('ice-candidate', (candidate, toUserId) => {
-                socket.to(roomId).emit('ice-candidate', candidate, userId, toUserId);
+            socket.on('ice-candidate', ({ candidate, target }) => {
+                socket.to(roomId).emit('ice-candidate', {
+                    candidate,
+                    senderId: userId,
+                    target
+                });
             });
 
             // Chat Message Handlers
@@ -59,7 +72,7 @@ export default function setupSockets(io) {
 
             socket.on('disconnect', () => {
                 console.log(`User ${userId} disconnected from ${roomId}`);
-                socket.to(roomId).emit('user-disconnected', userId);
+                socket.to(roomId).emit('user-disconnected', { userId });
             });
         });
     });

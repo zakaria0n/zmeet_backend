@@ -1,21 +1,30 @@
 import express from 'express';
-import { supabase } from '../services/supabaseClient.js';
+import { supabase, supabaseClient } from '../services/supabaseClient.js';
 
 const router = express.Router();
 
+async function getAuthenticatedUser(req) {
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
+    if (!token) {
+        throw new Error('Missing auth token');
+    }
+
+    const { data: { user }, error } = await supabaseClient.auth.getUser(token);
+
+    if (error || !user) {
+        throw new Error('Invalid auth token');
+    }
+
+    return user;
+}
+
 // Get all recordings for a specific user
 router.get('/my-recordings', async (req, res) => {
-    // Basic extraction, usually handled by a middleware
-    const authHeader = req.headers.authorization;
-    if (!authHeader) return res.status(401).json({ error: 'Missing auth token' });
-
-    // In a real app we'd verify the JWT, here we trust the created_by sent by frontend or fetch using supabaseClient auth (which requires standard anon token).
-    // Using simple query parameter for demo purposes matching the requesting user
-    const userId = req.query.userId;
-
-    if (!userId) return res.status(400).json({ error: 'userId parameter required' });
-
     try {
+        const user = await getAuthenticatedUser(req);
+
         const { data, error } = await supabase
             .from('Recordings')
             .select(`
@@ -24,34 +33,38 @@ router.get('/my-recordings', async (req, res) => {
                 file_url,
                 created_at
             `)
-            .eq('created_by', userId)
+            .eq('created_by', user.id)
             .order('created_at', { ascending: false });
 
         if (error) throw error;
 
         res.status(200).json(data);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        const status = err.message === 'Missing auth token' || err.message === 'Invalid auth token' ? 401 : 500;
+        res.status(status).json({ error: err.message });
     }
 });
 
 // Save recording metadata to Database
 router.post('/save-metadata', async (req, res) => {
-    const { room_code, created_by, file_url } = req.body;
+    const { room_code, file_url } = req.body;
 
-    if (!room_code || !created_by || !file_url) {
+    if (!room_code || !file_url) {
         return res.status(400).json({ error: 'Missing required fields' });
     }
 
     try {
+        const user = await getAuthenticatedUser(req);
+
         const { data, error } = await supabase
             .from('Recordings')
-            .insert([{ room_code, created_by, file_url }]);
+            .insert([{ room_code, created_by: user.id, file_url }]);
 
         if (error) throw error;
         res.status(201).json({ success: true, data });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        const status = err.message === 'Missing auth token' || err.message === 'Invalid auth token' ? 401 : 500;
+        res.status(status).json({ error: err.message });
     }
 });
 
