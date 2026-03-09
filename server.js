@@ -12,11 +12,12 @@ dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
+const allowedOrigins = ['https://zmeet.vercel.app', 'http://localhost:5173', 'http://127.0.0.1:5173'];
 
 // CORS config
 app.use(cors({
-    origin: '*', // For development. In production, restrict to Vercel domain.
-    methods: ['GET', 'POST']
+    origin: allowedOrigins,
+    methods: ['GET', 'POST', 'DELETE', 'OPTIONS']
 }));
 
 app.use(express.json());
@@ -29,7 +30,7 @@ app.use('/api/recordings', recordingRoutes);
 // Socket.io setup
 const io = new Server(server, {
     cors: {
-        origin: '*', // Allow all origins for dev
+        origin: allowedOrigins,
         methods: ['GET', 'POST']
     }
 });
