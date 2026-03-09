@@ -5,6 +5,7 @@ import { Server } from 'socket.io';
 import dotenv from 'dotenv';
 import authRoutes from './routes/authRoutes.js';
 import roomRoutes from './routes/roomRoutes.js';
+import recordingRoutes from './routes/recordingRoutes.js';
 import setupSockets from './sockets/socketHandler.js';
 
 dotenv.config();
@@ -23,6 +24,7 @@ app.use(express.json());
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/rooms', roomRoutes);
+app.use('/api/recordings', recordingRoutes);
 
 // Socket.io setup
 const io = new Server(server, {
