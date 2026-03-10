@@ -136,6 +136,13 @@ export default function setupSockets(io) {
                 }
             });
 
+            socket.on('reaction', (reactionObj) => {
+                io.to(roomId).emit('reaction', {
+                    ...reactionObj,
+                    timestamp: new Date().toISOString()
+                });
+            });
+
             socket.on('disconnect', () => {
                 console.log(`User ${userId} disconnected from ${roomId}`);
                 socket.to(roomId).emit('user-disconnected', { userId });
