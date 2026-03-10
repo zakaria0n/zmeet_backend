@@ -60,11 +60,38 @@ function getExistingUsersInRoom(io, roomId) {
     return [...room]
         .map(socketId => io.sockets.sockets.get(socketId))
         .filter(Boolean)
-        .filter(currentSocket => currentSocket.userId)
+        .filter(currentSocket => currentSocket.data.userId)
         .map(currentSocket => ({
-            userId: currentSocket.userId,
-            userName: currentSocket.userName
+            userId: currentSocket.data.userId,
+            userName: currentSocket.data.userName
         }));
+}
+
+function findSocketByUserId(io, roomId, userId) {
+    const room = io.sockets.adapter.rooms.get(roomId);
+
+    if (!room) {
+        return null;
+    }
+
+    for (const socketId of room) {
+        const currentSocket = io.sockets.sockets.get(socketId);
+
+        if (currentSocket?.data.userId === userId) {
+            return currentSocket;
+        }
+    }
+
+    return null;
+}
+
+function emitToTarget(io, roomId, targetUserId, eventName, payload) {
+    if (!roomId || !targetUserId) {
+        return;
+    }
+
+    const targetSocket = findSocketByUserId(io, roomId, targetUserId);
+    targetSocket?.emit(eventName, payload);
 }
 
 export default function setupSockets(io) {
@@ -82,9 +109,10 @@ export default function setupSockets(io) {
 
             const existingUsers = getExistingUsersInRoom(io, roomId);
 
-            socket.userId = userId;
-            socket.roomId = roomId;
-            socket.userName = userName;
+            socket.data.roomId = roomId;
+            socket.data.roomDbId = room.id;
+            socket.data.userId = userId;
+            socket.data.userName = userName;
             socket.join(roomId);
 
             const chatHistory = await getRoomChatHistory(room.id);
@@ -92,61 +120,73 @@ export default function setupSockets(io) {
             socket.emit('existing-users', existingUsers);
 
             socket.to(roomId).emit('user-connected', { userId, userName });
+        });
 
-            socket.on('webrtc-offer', ({ offer, target }) => {
-                socket.to(roomId).emit('webrtc-offer', {
-                    offer,
-                    senderId: userId,
-                    target
-                });
+        socket.on('webrtc-offer', ({ offer, target }) => {
+            emitToTarget(io, socket.data.roomId, target, 'webrtc-offer', {
+                offer,
+                senderId: socket.data.userId,
+                target
+            });
+        });
+
+        socket.on('webrtc-answer', ({ answer, target }) => {
+            emitToTarget(io, socket.data.roomId, target, 'webrtc-answer', {
+                answer,
+                senderId: socket.data.userId,
+                target
+            });
+        });
+
+        socket.on('ice-candidate', ({ candidate, target }) => {
+            emitToTarget(io, socket.data.roomId, target, 'ice-candidate', {
+                candidate,
+                senderId: socket.data.userId,
+                target
+            });
+        });
+
+        socket.on('chat-message', async (messageObj) => {
+            if (!socket.data.roomId) {
+                return;
+            }
+
+            io.to(socket.data.roomId).emit('chat-message', {
+                ...messageObj,
+                timestamp: new Date().toISOString()
             });
 
-            socket.on('webrtc-answer', ({ answer, target }) => {
-                socket.to(roomId).emit('webrtc-answer', {
-                    answer,
-                    senderId: userId,
-                    target
-                });
-            });
-
-            socket.on('ice-candidate', ({ candidate, target }) => {
-                socket.to(roomId).emit('ice-candidate', {
-                    candidate,
-                    senderId: userId,
-                    target
-                });
-            });
-
-            socket.on('chat-message', async (messageObj) => {
-                io.to(roomId).emit('chat-message', {
-                    ...messageObj,
-                    timestamp: new Date().toISOString()
-                });
-
-                try {
-                    if (room?.id && messageObj.senderId && messageObj.text) {
-                        await supabase.from('Messages').insert([{
-                            room_id: room.id,
-                            sender_id: messageObj.senderId,
-                            message: messageObj.text
-                        }]);
-                    }
-                } catch (err) {
-                    console.error("Error saving chat message:", err.message);
+            try {
+                if (socket.data.roomDbId && messageObj.senderId && messageObj.text) {
+                    await supabase.from('Messages').insert([{
+                        room_id: socket.data.roomDbId,
+                        sender_id: messageObj.senderId,
+                        message: messageObj.text
+                    }]);
                 }
-            });
+            } catch (err) {
+                console.error('Error saving chat message:', err.message);
+            }
+        });
 
-            socket.on('reaction', (reactionObj) => {
-                io.to(roomId).emit('reaction', {
-                    ...reactionObj,
-                    timestamp: new Date().toISOString()
-                });
-            });
+        socket.on('reaction', (reactionObj) => {
+            if (!socket.data.roomId) {
+                return;
+            }
 
-            socket.on('disconnect', () => {
+            io.to(socket.data.roomId).emit('reaction', {
+                ...reactionObj,
+                timestamp: new Date().toISOString()
+            });
+        });
+
+        socket.on('disconnect', () => {
+            const { roomId, userId } = socket.data;
+
+            if (roomId && userId) {
                 console.log(`User ${userId} disconnected from ${roomId}`);
                 socket.to(roomId).emit('user-disconnected', { userId });
-            });
+            }
         });
     });
 }
